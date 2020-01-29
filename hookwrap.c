@@ -398,6 +398,8 @@ hook_state_machine(uint32_t t_h, void *rv, void *arg0, void *arg1, void *arg2)
 			*(FILE **)rv = hstream->stream;
 			break;
 		}
+		/* XXX oops, figure out if something else got left out too! */
+		return *rvp;
 
 	case HOOK_PCLOSE:
 		if (hookarg == HOOK_PRE)
