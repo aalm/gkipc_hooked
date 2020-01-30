@@ -89,16 +89,13 @@ struct xyz {
 		CATNX(p_,x) = \
 		    (CATNX(x,_fp_t))dlsym(RTLD_NEXT, STRNX(x)); \
 	} while (0)
+#define	HOOK_FP(x)	{ STRNX(x), &(CATNX(p_,x)) }
 
 /* ipc_ typedef & static function pointer definition */
 #define	IPC_TDD(x, y, z, ...)	\
     typedef x (*CATNX(y,_fp_t))(z, ##__VA_ARGS__); \
     static CATNX(y,_fp_t) CATNX(ipc_,y) = NULL;
-#define	CHK_IPC_DFP(x)	do { \
-	if (!CATNX(ipc_,x)) \
-		CATNX(ipc_,x) = \
-		    (CATNX(x,_fp_t))ipc_sym_addr(STRNX(x)); \
-	} while (0)
+#define	IPC_FPD(x)	{ STRNX(x), &(CATNX(ipc_,x)) }
 
 /* the hooks called by 'ipc'-code */
 HOOK_LIBC(sighandler_t,	signal,		int, sighandler_t);
@@ -321,7 +318,6 @@ hook_state_machine(uint32_t t_h, void *rv, void *arg0, void *arg1, void *arg2)
 	case HOOK_OPEN:
 		if (hookarg == HOOK_PRE)
 			return 0;	/* no op .. for now atleast */
-		CHK_HOOK_FP(malloc);
 		tmpsz = strlen(*arg0cp);
 		hfd = p_malloc(sizeof(struct hooked_fd) + tmpsz + 1);
 		if (!hfd)
@@ -338,7 +334,6 @@ hook_state_machine(uint32_t t_h, void *rv, void *arg0, void *arg1, void *arg2)
 	case HOOK_CLOSE:
 		if (hookarg == HOOK_PRE)
 			return 0;	/* no op .. for now atleast */
-		CHK_HOOK_FP(free);
 		SLIST_FOREACH(hfd, &hooked_fds, fds) {
 			if (*arg0ip == hfd->fd)
 				break;
@@ -404,7 +399,6 @@ hook_state_machine(uint32_t t_h, void *rv, void *arg0, void *arg1, void *arg2)
 	case HOOK_PCLOSE:
 		if (hookarg == HOOK_PRE)
 			return 0;	/* no op .. for now atleast */
-		CHK_HOOK_FP(free);
 
 		SLIST_FOREACH(hstream, &hooked_streams, streams) {
 			if (*(FILE **)arg0 == hstream->stream)
@@ -438,7 +432,6 @@ signal(int signum, sighandler_t handler)
 {
 	sighandler_t rv;
 
-	CHK_HOOK_FP(signal);
 	(void)hook_enter(HOOK_SIGNAL, &rv, &signum, &handler, NULL);
 	if (!rv)
 		rv = p_signal(signum, handler);
@@ -465,7 +458,6 @@ prctl(int option, ...)
 	argp = va_arg(args, void *);
 	va_end(args);
 
-	CHK_HOOK_FP(prctl);
 	(void)hook_enter(HOOK_PRCTL, &rv, &option, &argp, NULL);
 	if (!rv)
 		rv = p_prctl(option, argp);
@@ -484,6 +476,10 @@ ioctl(int fd, request_t request, ...)
 	va_end(args);
 
 	CHK_HOOK_FP(ioctl);
+/* XXX */
+/*	if (request == 0x8914)
+		return -1;*/
+
 	(void)hook_enter(HOOK_IOCTL, &rv, &fd, &request, &argp);
 	if (!rv)
 		rv = p_ioctl(fd, request, argp);
@@ -495,7 +491,6 @@ access(const char *path, int mode)
 {
 	int rv = 0;
 
-	CHK_HOOK_FP(access);
 	(void)hook_enter(HOOK_ACCESS, &rv, &path, &mode, NULL);
 	if (!rv)
 		rv = p_access(path, mode);
@@ -513,7 +508,6 @@ open(const char *pathname, int flags, ...)
 	mode = va_arg(args, int);
 	va_end(args);
 
-	CHK_HOOK_FP(open);
 	(void)hook_enter(HOOK_OPEN, &rv, &flags, &mode, NULL);
 	if (!rv)
 		rv = p_open(pathname, flags, mode);
@@ -525,7 +519,6 @@ close(int fd)
 {
 	int rv = 0;
 
-	CHK_HOOK_FP(close);
 	(void)hook_enter(HOOK_CLOSE, &rv, &fd, NULL, NULL);
 	if (!rv)
 		rv = p_close(fd);
@@ -537,7 +530,6 @@ read(int fd, void *buf, size_t count)
 {
 	ssize_t rv = 0;
 
-	CHK_HOOK_FP(read);
 	(void)hook_enter(HOOK_READ, &rv, &fd, &buf, &count);
 	if (!rv)
 		rv = p_read(fd, buf, count);
@@ -561,8 +553,6 @@ int
 pclose(FILE *stream)
 {
 	int rv = 0;
-
-	CHK_HOOK_FP(pclose);
 
 	(void)hook_enter(HOOK_PCLOSE, &rv, &stream, NULL, NULL);
 	if (!rv)
@@ -732,18 +722,26 @@ ipc_sym_addr(const char *name)
  * but instead manually verify by looking at the disassembly.
  */
 /* does check the cmdline params, first in main() */
-IPC_TDD(void,		vCheckInputPara,	int, const char **);
+IPC_TDD(void,		vCMOS_SetSensorType,	u_int);
 IPC_TDD(void,		vSetThreadName,		const char *);
 
 /* these get called by vIpcInit() in this order */
 IPC_TDD(void,		vGetConfigInfo,		void);
+IPC_TDD(void *,		psGetDevDefaultInfo,	void);
+IPC_TDD(void *,		pGetDevFunction,	void);
+IPC_TDD(void *,		pGetSetting,		void);
 IPC_TDD(void,		vSettingInit,		void);
 IPC_TDD(void,		vUPG_Init,		void);
 IPC_TDD(void,		vGPIO_PinAssignInit,	void);
 IPC_TDD(void,		vI2CInit,		void);
 IPC_TDD(void,		vUartInit,		void);
 IPC_TDD(void,		vGatewayDevTypeInit,	void);
+/*C_TDD(void,		vSaveSetting,		void);*/
 IPC_TDD(void,		vDevTypeInit,		void);
+IPC_TDD(int,		iUSER_Init,		void);
+IPC_TDD(int,		iPUSH_Init,		void);
+IPC_TDD(void,		vVarInit,		void);
+IPC_TDD(void,		vKeyInit,		void);
 
 /* rnd symbols for testing / later use */
 IPC_TDD(char *,		pcGetMyUID,		void);
@@ -761,41 +759,79 @@ IPC_TDD(void,		vTimerHandler,		void *);
 IPC_TDD(void,		vTIMER_TASK_Handle,	int);
 IPC_TDD(uint32_t,	dwTimeCurrSec,		uint32_t);
 #endif
-
+static struct {
+	const char *name;
+	void *fp;
+} hook_fps[] = {
+	HOOK_FP(malloc),
+	HOOK_FP(free),
+	HOOK_FP(open),
+	HOOK_FP(read),
+	HOOK_FP(close),
+	HOOK_FP(signal),
+	HOOK_FP(prctl),
+	HOOK_FP(ioctl),
+	HOOK_FP(access),
+	HOOK_FP(popen),
+	HOOK_FP(pclose),
+	IPC_FPD(vCMOS_SetSensorType),
+	IPC_FPD(vSetThreadName),
+	IPC_FPD(vGetConfigInfo),
+	IPC_FPD(psGetDevDefaultInfo),
+	IPC_FPD(pGetDevFunction),
+	IPC_FPD(pGetSetting),
+	IPC_FPD(vSettingInit),
+	IPC_FPD(vUPG_Init),
+	IPC_FPD(vGPIO_PinAssignInit),
+	IPC_FPD(vI2CInit),
+	IPC_FPD(vUartInit),
+	IPC_FPD(vGatewayDevTypeInit),
+	IPC_FPD(vDevTypeInit),
+	IPC_FPD(pcGetMyUID),
+	IPC_FPD(fgNET_SetStaticIPWithStr),
+	IPC_FPD(iUSER_Init),
+	IPC_FPD(iPUSH_Init),
+	IPC_FPD(vVarInit),
+};
 static void
 our_vIpcInit(void)
 {
-/* XXX	int iVar1;
+/*	int iVar1;
 	int iVar2;
-	int iVar3;
-	uint uVar4;*/
+	int iVar3;*/
+/* XXX	uint uVar4;*/
+/* XXX	uint uVar5;
+	char *pcVar6;
+	time_t tVar7;
+	tm local_60;
+	undefined auStack52 [28];
+	time_t local_18;
+	int local_14;*/
 
 /* XXX	if (iLOG_CheckCapture() == 0)
 		DAT_0039072c = 1;*/
 
 /*	vCMOS_SensorTypeInit(); no-op in binary, simply void (){ return; } */
 
-	CHK_IPC_DFP(vGetConfigInfo);
-	if (ipc_vGetConfigInfo)
-		ipc_vGetConfigInfo();
+	ipc_vGetConfigInfo();
 
-/* XXX	iVar1 = psGetDevDefaultInfo();
-	iVar2 = pGetDevFunction();
-	iVar3 = pGetSetting();
-	if ((*(byte *)(iVar1 + 0x140) & 1) != 0) {
+/*	iVar1 = (int)ipc_psGetDevDefaultInfo();
+	iVar2 = (int)ipc_pGetDevFunction();
+	iVar3 = (int)ipc_pGetSetting();*/
+/* XXX	if ((*(byte *)(iVar1 + 0x140) & 1) != 0) {
 		system_cmd("telnetd &");
 	}*/
 
 /* XXX	uVar4 = dwGetTimeMS();
 	printf("line=%d,costms=%u %s\n",0x30b3,uVar4,"vIpcInit");*/
-	CHK_IPC_DFP(vSettingInit);
-	if (ipc_vSettingInit)
-		ipc_vSettingInit();
-/*	vUPG_Init();
-	vGPIO_PinAssignInit();
-	vI2CInit();
-	vUartInit();
-	vGatewayDevTypeInit();*/
+
+	ipc_vSettingInit();
+
+/* XXX	vUPG_Init();*/
+/* XXX	vGPIO_PinAssignInit();*/
+/* XXX	vI2CInit();*/
+/* XXX	vUartInit();*/
+	ipc_vGatewayDevTypeInit();
 
 /* XXX	if ((*(byte *)(iVar2 + 2) & 0x20) == 0) {
 		iVar2 = strcmp((char *)(iVar3 + 0x96b),"admin");
@@ -807,12 +843,14 @@ our_vIpcInit(void)
 			vSaveSetting();
 		}
 	}*/
+	ipc_vDevTypeInit();
+	ipc_iUSER_Init();
+	ipc_iPUSH_Init();
 
-/* XXX	iUSER_Init();
-	iPUSH_Init();
-	vVarInit();
-	vKeyInit();
-	vZS_ENCRY_Handle();
+/* XXX	ipc_vVarInit(); segfaults... */
+
+/* XXX	ipc_vKeyInit();*/
+/* XXX	vZS_ENCRY_Handle();
 	vDELAY_TASK_Init();
 	vGpioDevInit();
 	vTimerModuleInit();
@@ -824,7 +862,7 @@ our_vIpcInit(void)
 	iDsaInit();
 	vMotorInit();*/
 
-/*	local_60.tm_sec = 0;
+/* XXX	local_60.tm_sec = 0;
 	local_60.tm_year = 0x73;
 	local_60.tm_mon = 0;
 	local_60.tm_mday = 1;
@@ -906,24 +944,26 @@ our_vIpcInit(void)
 
 }
 
+/* not the first symbol i had named myself, and forgotten about */
+void
+our_vCheckInputPara(int argc, char **argv)
+{
+	(void)argc;
+	(void)argv;
+	/* the set sensor type, what most certainly dealt from elsewhere too */;
+	ipc_vCMOS_SetSensorType(0x19);
+}
+
 static void
 hooked_main(void)
 {
-	static const char *fake_argv[] = { "ipc",  "sensortype=sc1135", NULL };
+	static char *fake_argv[] = { "ipc",  "sensortype=sc1135", NULL };
 
-	CHK_IPC_DFP(vCheckInputPara);
-	if (ipc_vCheckInputPara)
-		ipc_vCheckInputPara(2, &fake_argv[0]);
-
-	CHK_IPC_DFP(vSetThreadName);
-	if (ipc_vSetThreadName)
-		ipc_vSetThreadName("main");
-
+	our_vCheckInputPara(2, &fake_argv[0]);
+	ipc_vSetThreadName("main");
 	our_vIpcInit();
 
-	CHK_IPC_DFP(pcGetMyUID);
-	if (ipc_pcGetMyUID)
-		printf("  got myuid \"%s\"\n", ipc_pcGetMyUID());
+	printf("  got myuid \"%s\"\n", ipc_pcGetMyUID());
 
 	exit(0);
 	while (!g_begone) {
@@ -952,12 +992,31 @@ static int hookcnt = 0;
 static void
 _hookwrap_init(void)
 {
+	u_int i;
+
 	DPRINTF("%s %d\n", __func__, ++hookcnt);
+	for (i = 0; i < /*nitems(hook_fps)*/HOOK_MAX; i++) {
+		if (!hook_fps[i].name ||
+		    !hook_fps[i].fp)
+			goto failout;
+		*(void **)hook_fps[i].fp =
+		    (void *)dlsym(RTLD_NEXT, hook_fps[i].name);
+	}
+
 	if (!ipc_elfbuf)
 		if (read_file("./ipc", &ipc_elfbuf, NULL) != 0 || !ipc_elfbuf)
 			exit(1);
-	/* XXX gather CHK_[HOOK_|IPC_D]FP()s here ? */
 
+	for (i = HOOK_MAX - 1; i < nitems(hook_fps); i++) {
+		if (!hook_fps[i].name ||
+		    !hook_fps[i].fp)
+			goto failout;
+		*(void **)hook_fps[i].fp =
+		    (void *)ipc_sym_addr(hook_fps[i].name);
+	}
+	return;
+failout:
+	exit(1);
 }
 static void
 _hookwrap_fini(void)
