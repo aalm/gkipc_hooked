@@ -10,13 +10,6 @@ CFLAGS	+=	-Wall -Wextra
 all:
 	$(CC) $(CFLAGS) -o hw.so -fPIC hookwrap.c -shared -ldl
 	$(CC) $(CFLAGS) -o test_target test_target.c
-	@scp -i ~/.ssh/id_ipchook_rsa hw.so 10.0.1.53:~/
-	@ssh -i ~/.ssh/id_ipchook_rsa 10.0.1.53 ~/bin/mv_ipc_hookwrap.sh
-	@echo -- build done -- hw.so transferred to the nfs host
-
-#oldall:
-#	$(CC) $(CFLAGS) -fPIC -c -o hookwrap.o hookwrap.c
-#	$(CC) $(CFLAGS) -shared -o hw.so hookwrap.o -ldl
 
 clean:
 	rm -f *.so *.o test_target
