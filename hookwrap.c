@@ -47,6 +47,7 @@
 #define	STRNX(a)	#a
 #define	STR(a)		STRNX(a)
 
+#if !defined(HOOK_TEST)
 bool g_fprintf_passthru = false;
 #define	DPRINTF(fmt, ...)					\
 		do { if (!g_fprintf_passthru) {			\
@@ -55,12 +56,13 @@ bool g_fprintf_passthru = false;
 			fflush(stderr);				\
 			g_fprintf_passthru = false;		\
 		} } while(0)
+#else
+#define	DPRINTF(fmt, ...)
+#endif
 
 typedef int	request_t;
 /*pedef void	(*abort_t)(void) __attribute__ ((noreturn));*/
 typedef void	(*sighandler_t)(int);
-
-static int g_begone = 0;
 
 /* a list of hooked fds ? */
 static SLIST_HEAD(, hooked_fd) hooked_fds = SLIST_HEAD_INITIALIZER(hooked_fds);
@@ -114,8 +116,6 @@ HOOK_LIBC(void,		free,		void *);
 static void _hookwrap_init(void) __attribute__ ((constructor));
 static void _hookwrap_fini(void) __attribute__ ((destructor));
 
-static uint8_t *ipc_elfbuf = NULL;
-
 /* XXX eww, do clean up */
 enum {
 	HOOK_NOT = 0,
@@ -162,9 +162,13 @@ hook_leave(uint32_t hook, void *rv, void *a0, void *a1, void *a2)
 
 static void		hooked_main(void);
 static void		hooked_vNetDevProc(void);
+#if !defined(HOOK_TEST)
 static ssize_t		get_filesz(int);
 static int		read_file(const char *, uint8_t **, size_t *);
-static uint32_t		ipc_sym_addr(const char *);
+static uint32_t		ipc_sym_addr(uint8_t *, const char *);
+
+static int g_begone = 0;
+#endif
 
 static struct {
 	const char *name;
@@ -189,6 +193,9 @@ static struct {
 } access_hooks[] = {
 /*	{ "/etc/version.ini",	-1 },*/	/* was just testing with this */
 	{ "/bin/mtd_debug",	-1 },
+#if defined(HOOK_TEST)
+	{ "asd",		0 },
+#endif
 };
 
 /* should somehow link to file_hooks[] */
@@ -205,7 +212,11 @@ static struct {
 	uint32_t	 flags;
 	int		 rv;
 } system_hooks[] = {
-	{ "telnetd &",	HOOK_RV,	0 },
+	{ "telnetd &",		HOOK_RV,	0 },
+#if defined(HOOK_TEST)
+	{ "printf asdfg\\n",	HOOK_RV,	0 },
+	{ "printf fail\\n",	HOOK_RV,	1 },
+#endif
 };
 
 static struct {
@@ -237,7 +248,9 @@ hook_state_machine(uint32_t t_h, void *rv, void *arg0, void *arg1, void *arg2)
 	const char **arg0cp = arg0;
 	const char **arg1cp = arg1;
 	u_int *arg0up = arg0;
+#if !defined(HOOK_TEST)
 	u_int *arg1up = arg1;
+#endif
 	u_int *arg2up = arg2;
 	int *arg0ip = arg0;
 	int *arg1ip = arg1;
@@ -270,7 +283,7 @@ hook_state_machine(uint32_t t_h, void *rv, void *arg0, void *arg1, void *arg2)
 		DPRINTF("\n  hooking signal() return into hooked_main()\n");
 		hook_states[th] |= 1;
 		hooked_main();
-		return (int)NULL;	/* above should never return */
+		return *rvp;	/* above should never return */
 
 	case HOOK_PRCTL:
 		if (hookarg == HOOK_PRE)
@@ -286,7 +299,7 @@ hook_state_machine(uint32_t t_h, void *rv, void *arg0, void *arg1, void *arg2)
 			DPRINTF("\n  hooking %s\n", prctl_hooks[i].name);
 			hook_states[th] |= 1;
 			prctl_hooks[i].hook_fp();
-			return -1;	/* above should never return */
+			/* above should never return */
 		}
 		return *rvp;
 
@@ -318,6 +331,8 @@ hook_state_machine(uint32_t t_h, void *rv, void *arg0, void *arg1, void *arg2)
 	case HOOK_OPEN:
 		if (hookarg == HOOK_PRE)
 			return 0;	/* no op .. for now atleast */
+		DPRINTF("\topen(\"%s\", %#x, %#x)\n",
+		    *arg0cp, *arg1up, *rvp);
 		tmpsz = strlen(*arg0cp);
 		hfd = p_malloc(sizeof(struct hooked_fd) + tmpsz + 1);
 		if (!hfd)
@@ -412,13 +427,15 @@ hook_state_machine(uint32_t t_h, void *rv, void *arg0, void *arg1, void *arg2)
 
 	/* could be used to help tracking memory we care about, for free() */
 	case HOOK_MALLOC:
-		if (hookarg != HOOK_PRE)
+		if (hookarg != HOOK_PRE) {
 			DPRINTF("\tmalloc(%zd) == %p\n", *(size_t *)arg0, *(void **)rvp);
+		}
 		return *rvp;
 
 	case HOOK_FREE:
-		if (hookarg != HOOK_PRE)
+		if (hookarg != HOOK_PRE) {
 			DPRINTF("\tfree(%p)\n", *(void **)arg0);
+		}
 		/* could dump to a file for later checking.. */
 		return *rvp;
 
@@ -508,10 +525,10 @@ open(const char *pathname, int flags, ...)
 	mode = va_arg(args, int);
 	va_end(args);
 
-	(void)hook_enter(HOOK_OPEN, &rv, &flags, &mode, NULL);
+	(void)hook_enter(HOOK_OPEN, &rv, &pathname, &flags, &mode);
 	if (!rv)
 		rv = p_open(pathname, flags, mode);
-	return hook_leave(HOOK_OPEN, &rv, &flags, &mode, NULL);
+	return hook_leave(HOOK_OPEN, &rv, &pathname, &flags, &mode);
 }
 
 int
@@ -600,6 +617,7 @@ free(void *ptr)
 	(void)hook_leave(HOOK_FREE, &rv, &ptr, NULL, NULL);
 }
 
+#if !defined(HOOK_TEST)
 /* allocate memory + read a file */
 static int
 read_file(const char *path, uint8_t **buf, size_t *len)
@@ -672,10 +690,10 @@ get_filesz(int fd)
 }
 
 static uint32_t
-ipc_sym_addr(const char *name)
+ipc_sym_addr(uint8_t *elfbuf, const char *name)
 {
-	Elf32_Ehdr *eh = (Elf32_Ehdr *)ipc_elfbuf;
-	Elf32_Shdr *sh = (Elf32_Shdr *)&ipc_elfbuf[eh->e_shoff];
+	Elf32_Ehdr *eh = (Elf32_Ehdr *)elfbuf;
+	Elf32_Shdr *sh = (Elf32_Shdr *)&elfbuf[eh->e_shoff];
 	const char *symstp, *symname;
 	Elf32_Sym *sym;
 	int i, symcnt;
@@ -688,8 +706,8 @@ ipc_sym_addr(const char *name)
 		    sh[i].sh_entsize == 0)
 			continue; /* print error ? */
 
-		symstp = (char *)&ipc_elfbuf[sh[sh[i].sh_link].sh_offset];
-		sym = (Elf32_Sym *)&ipc_elfbuf[sh[i].sh_offset];
+		symstp = (char *)&elfbuf[sh[sh[i].sh_link].sh_offset];
+		sym = (Elf32_Sym *)&elfbuf[sh[i].sh_offset];
 		symcnt = sh[i].sh_size / sh[i].sh_entsize;
 
 		for (; symcnt > 0; symcnt--, sym++) {
@@ -741,7 +759,7 @@ IPC_TDD(void,		vDevTypeInit,		void);
 IPC_TDD(int,		iUSER_Init,		void);
 IPC_TDD(int,		iPUSH_Init,		void);
 IPC_TDD(void,		vVarInit,		void);
-IPC_TDD(void,		vKeyInit,		void);
+/*C_TDD(void,		vKeyInit,		void);*/
 
 /* rnd symbols for testing / later use */
 IPC_TDD(char *,		pcGetMyUID,		void);
@@ -759,6 +777,8 @@ IPC_TDD(void,		vTimerHandler,		void *);
 IPC_TDD(void,		vTIMER_TASK_Handle,	int);
 IPC_TDD(uint32_t,	dwTimeCurrSec,		uint32_t);
 #endif
+#endif
+
 static struct {
 	const char *name;
 	void *fp;
@@ -772,8 +792,10 @@ static struct {
 	HOOK_FP(prctl),
 	HOOK_FP(ioctl),
 	HOOK_FP(access),
+	HOOK_FP(system),
 	HOOK_FP(popen),
 	HOOK_FP(pclose),
+#if !defined(HOOK_TEST)
 	IPC_FPD(vCMOS_SetSensorType),
 	IPC_FPD(vSetThreadName),
 	IPC_FPD(vGetConfigInfo),
@@ -792,7 +814,10 @@ static struct {
 	IPC_FPD(iUSER_Init),
 	IPC_FPD(iPUSH_Init),
 	IPC_FPD(vVarInit),
+#endif
 };
+
+#if !defined(HOOK_TEST)
 static void
 our_vIpcInit(void)
 {
@@ -950,13 +975,40 @@ our_vCheckInputPara(int argc, char **argv)
 {
 	(void)argc;
 	(void)argv;
-	/* the set sensor type, what most certainly dealt from elsewhere too */;
-	ipc_vCMOS_SetSensorType(0x19);
+
+	/* XXX "optimize"; check for "sensortype=" ? */
+	if (!strcmp(argv[1], "sensortype=sc1135"))
+		ipc_vCMOS_SetSensorType(0x19);
+	else
+	if (!strcmp(argv[1], "sensortype=sc2235"))
+		ipc_vCMOS_SetSensorType(0x21);
+	else
+	if (!strcmp(argv[1], "sensortype=sc2135"))
+		ipc_vCMOS_SetSensorType(0x1a);
+	else
+	if (!strcmp(argv[1], "sensortype=sc1145"))
+		ipc_vCMOS_SetSensorType(0x1c);
+	else
+	if (!strcmp(argv[1], "sensortype=ov9750"))
+		ipc_vCMOS_SetSensorType(0x1f);
+	else
+	if (!strcmp(argv[1], "sensortype=sc2232"))
+		ipc_vCMOS_SetSensorType(0x23);
+	else
+	if (!strcmp(argv[1], "sensortype=sc2315"))
+		ipc_vCMOS_SetSensorType(0x25);
+	else
+	if (!strcmp(argv[1], "sensortype=jxf23"))
+		ipc_vCMOS_SetSensorType(0x27);
+	/* XXX should write the sensor type to a file here ? */
+	/* XXX should read the sensor type from a file here if above fails */
 }
+#endif
 
 static void
 hooked_main(void)
 {
+#if !defined(HOOK_TEST)
 	static char *fake_argv[] = { "ipc",  "sensortype=sc1135", NULL };
 
 	our_vCheckInputPara(2, &fake_argv[0]);
@@ -969,32 +1021,38 @@ hooked_main(void)
 	while (!g_begone) {
 	}
 	exit(1);
+#else
+	printf("Hello World!\n");
+	return;
+#endif
 }
 
 /* XXX TOBEDONE */
 static void
 hooked_vNetDevProc(void)
 {
-	int loop_count = 0;
+#if !defined(HOOK_TEST)
+#else
+	u_int i, l = strlen("vNetDevProc");
 
-	while (!g_begone) {
-		sleep(5);
-		if (loop_count++ > 300) {
-			loop_count = 0;
-/*			if (ipc_))
-				ipc_();*/
-		}
+	for (i = 0; i < l; i++) {
+		printf("%c", "vNetDevProc"[i]);
+		fflush(stdout);
+		sleep(1);
 	}
+#endif
 }
 
 /* these are pretty useless */
-static int hookcnt = 0;
 static void
 _hookwrap_init(void)
 {
+#if !defined(HOOK_TEST)
+	uint8_t *ipc_elfbuf = NULL;
+#endif
 	u_int i;
 
-	DPRINTF("%s %d\n", __func__, ++hookcnt);
+	DPRINTF("%s\n", __func__);
 	for (i = 0; i < /*nitems(hook_fps)*/HOOK_MAX; i++) {
 		if (!hook_fps[i].name ||
 		    !hook_fps[i].fp)
@@ -1002,27 +1060,26 @@ _hookwrap_init(void)
 		*(void **)hook_fps[i].fp =
 		    (void *)dlsym(RTLD_NEXT, hook_fps[i].name);
 	}
-
-	if (!ipc_elfbuf)
-		if (read_file("./ipc", &ipc_elfbuf, NULL) != 0 || !ipc_elfbuf)
-			exit(1);
+#if !defined(HOOK_TEST)
+	if (read_file("./ipc", &ipc_elfbuf, NULL) != 0 || !ipc_elfbuf)
+		exit(1);	/* print error msg ? */
 
 	for (i = HOOK_MAX - 1; i < nitems(hook_fps); i++) {
 		if (!hook_fps[i].name ||
 		    !hook_fps[i].fp)
 			goto failout;
 		*(void **)hook_fps[i].fp =
-		    (void *)ipc_sym_addr(hook_fps[i].name);
+		    (void *)ipc_sym_addr(ipc_elfbuf, hook_fps[i].name);
 	}
+	p_free(ipc_elfbuf);
+#endif
 	return;
 failout:
+	DPRINTF("%s failed(%u)\n", __func__, i);
 	exit(1);
 }
 static void
 _hookwrap_fini(void)
 {
-	DPRINTF("%s %d\n", __func__, --hookcnt);
-	if (ipc_elfbuf)
-		p_free(ipc_elfbuf);
-	ipc_elfbuf = NULL;
+	DPRINTF("%s\n", __func__);
 }

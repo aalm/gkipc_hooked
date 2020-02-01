@@ -1,13 +1,15 @@
-# gkipc_hooked -- WIP..
+## gkipc_hooked -- WIP..
 
 if you have the necessary tools set up in your PATH,
-build should simply be:
-  $ make
+build should simply be:  
 
-which does produce the hw.so ipc hook/wrapper.
+    $ make
 
-simple usage goes like:
-  LD_PRELOAD="/full/path/to/hw.so" /path/to/ipc sensortype=sc1135
+which does produce the hw.so ipc hook/wrapper.  
 
-the cmdline arg isn't necessary atm., needs fixing it back into
+simple usage goes like:  
+
+    LD_PRELOAD="/full/path/to/hw.so" /path/to/ipc sensortype=sc1135
+
+the cmdline arg isn't necessary atm., needs fixing it back into  
 being customizable, maybe via env, or config-file...
